@@ -6,11 +6,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,8 +48,35 @@ func main() {
 	defer p.Close()
 	pool = p
 
-	if err := migrate(ctx); err != nil {
-		log.Fatalf("migrate: %v", err)
+	// Subcommands: `api migrate` is the kuso release hook; `api count` and
+	// `api fail` are cron / run targets for the e2e test.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "migrate":
+			if os.Getenv("MIGRATE_FAIL") == "1" {
+				log.Fatal("migrate: MIGRATE_FAIL=1 — failing on purpose")
+			}
+			if err := migrate(ctx); err != nil {
+				log.Fatalf("migrate: %v", err)
+			}
+			log.Print("migrate: ok")
+			return
+		case "count":
+			var n int64
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM todo`).Scan(&n); err != nil {
+				log.Fatalf("count: %v", err)
+			}
+			fmt.Printf("todo count: %d\n", n)
+			return
+		case "fail":
+			log.Fatal("fail: exiting 1 on purpose")
+		}
+	}
+	// Schema comes from the release hook; the server only verifies it.
+	if os.Getenv("MIGRATE_ON_BOOT") == "1" {
+		if err := migrate(ctx); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -50,6 +84,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
+	mux.HandleFunc("/api/info", infoHandler)
 	mux.HandleFunc("/api/todos", todosHandler)
 	mux.HandleFunc("/api/todos/", todoByIDHandler)
 
@@ -198,4 +233,93 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// fingerprint identifies a secret value without revealing it.
+func fingerprint(v string) string {
+	if v == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// infoHandler reports how kuso wired this pod: which env it runs in, which
+// database it talks to, whether redis answers, and fingerprints of secrets.
+func infoHandler(w http.ResponseWriter, r *http.Request) {
+	info := map[string]any{
+		"appEnv":      os.Getenv("APP_ENV"),
+		"greeting":    os.Getenv("GREETING"),
+		"demoSecret":  fingerprint(os.Getenv("DEMO_SECRET")),
+		"sharedToken": fingerprint(os.Getenv("SHARED_TOKEN")),
+		"providerKey": fingerprint(os.Getenv("PROVIDER_KEY")),
+		"hostname":    os.Getenv("HOSTNAME"),
+	}
+	var db string
+	var n int64
+	var schemaErr string
+	if err := pool.QueryRow(r.Context(), `SELECT current_database()`).Scan(&db); err != nil {
+		db = "error: " + err.Error()
+	}
+	if err := pool.QueryRow(r.Context(), `SELECT count(*) FROM todo`).Scan(&n); err != nil {
+		schemaErr = err.Error()
+	}
+	info["database"] = db
+	info["dbHost"] = hostOf(os.Getenv("DATABASE_URL"))
+	info["todoCount"] = n
+	if schemaErr != "" {
+		info["schemaError"] = schemaErr
+	}
+	info["redis"] = redisPing(os.Getenv("REDIS_URL"))
+	info["redisHost"] = hostOf(os.Getenv("REDIS_URL"))
+	var keys []string
+	for _, kv := range os.Environ() {
+		k := strings.SplitN(kv, "=", 2)[0]
+		for _, p := range []string{"DATABASE_", "POSTGRES_", "REDIS_", "S3_", "DEMO_", "SHARED_", "PROVIDER_", "APP_", "GREETING"} {
+			if strings.HasPrefix(k, p) {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	sort.Strings(keys)
+	info["envKeys"] = keys
+	writeJSON(w, http.StatusOK, info)
+}
+
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// redisPing speaks just enough RESP to AUTH + PING, so the demo needs no
+// redis client dependency.
+func redisPing(raw string) string {
+	if raw == "" {
+		return "not configured"
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "bad url"
+	}
+	c, err := net.DialTimeout("tcp", u.Host, 2*time.Second)
+	if err != nil {
+		return "dial: " + err.Error()
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	rd := bufio.NewReader(c)
+	if pw, ok := u.User.Password(); ok && pw != "" {
+		fmt.Fprintf(c, "*2\r\n$4\r\nAUTH\r\n$%d\r\n%s\r\n", len(pw), pw)
+		line, _ := rd.ReadString('\n')
+		if !strings.HasPrefix(line, "+OK") {
+			return "auth: " + strings.TrimSpace(line)
+		}
+	}
+	fmt.Fprint(c, "*1\r\n$4\r\nPING\r\n")
+	line, _ := rd.ReadString('\n')
+	return strings.TrimSpace(line)
 }
