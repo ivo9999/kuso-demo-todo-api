@@ -248,7 +248,7 @@ func fingerprint(v string) string {
 // database it talks to, whether redis answers, and fingerprints of secrets.
 func infoHandler(w http.ResponseWriter, r *http.Request) {
 	info := map[string]any{
-		"appEnv": os.Getenv("APP_ENV"), "version": "pr-preview",
+		"appEnv": os.Getenv("APP_ENV"), "version": "pr-preview-2",
 		"greeting":    os.Getenv("GREETING"),
 		"demoSecret":  fingerprint(os.Getenv("DEMO_SECRET")),
 		"sharedToken": fingerprint(os.Getenv("SHARED_TOKEN")),
