@@ -33,7 +33,7 @@ type todo struct {
 }
 
 // version is bumped by the e2e lifecycle test to tell deploys apart.
-const version = "v4"
+const version = "v5"
 
 var pool *pgxpool.Pool
 
@@ -81,8 +81,6 @@ func main() {
 			log.Fatalf("migrate: %v", err)
 		}
 	}
-
-	log.Fatal("boot: crashing on purpose (e2e v4)")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
