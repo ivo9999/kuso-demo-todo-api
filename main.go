@@ -327,3 +327,4 @@ func redisPing(raw string) string {
 	line, _ := rd.ReadString('\n')
 	return strings.TrimSpace(line)
 }
+func broken( {
