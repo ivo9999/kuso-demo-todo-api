@@ -32,6 +32,9 @@ type todo struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// version is bumped by the e2e lifecycle test to tell deploys apart.
+const version = "v2"
+
 var pool *pgxpool.Pool
 
 func main() {
@@ -248,6 +251,7 @@ func fingerprint(v string) string {
 // database it talks to, whether redis answers, and fingerprints of secrets.
 func infoHandler(w http.ResponseWriter, r *http.Request) {
 	info := map[string]any{
+		"version":     version,
 		"appEnv":      os.Getenv("APP_ENV"),
 		"greeting":    os.Getenv("GREETING"),
 		"demoSecret":  fingerprint(os.Getenv("DEMO_SECRET")),
