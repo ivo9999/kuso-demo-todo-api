@@ -33,7 +33,7 @@ type todo struct {
 }
 
 // version is bumped by the e2e lifecycle test to tell deploys apart.
-const version = "v2"
+const version = "v3"
 
 var pool *pgxpool.Pool
 
