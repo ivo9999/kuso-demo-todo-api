@@ -21,3 +21,5 @@ Tiny Go HTTP service backing the kuso demo todo app. Exposes JSON CRUD over a Po
 2. Add a Postgres addon to it.
 3. Add this repo as a service. The runtime is auto-detected (nixpacks → Go).
 4. Reference the addon DSN as `DATABASE_URL=${{ <addon>.DATABASE_URL }}`.
+
+preview test for kuso v0.33.0
