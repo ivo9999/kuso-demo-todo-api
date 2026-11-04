@@ -23,3 +23,4 @@ Tiny Go HTTP service backing the kuso demo todo app. Exposes JSON CRUD over a Po
 4. Reference the addon DSN as `DATABASE_URL=${{ <addon>.DATABASE_URL }}`.
 
 preview test for kuso v0.33.0
+retrigger
